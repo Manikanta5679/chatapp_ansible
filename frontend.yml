@@ -1,0 +1,45 @@
+- name: Configure Nginx as frontend reverse proxy
+  hosts: webserver
+  become: true
+  tasks:
+
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Configure Nginx for chatapp
+      copy:
+        dest: /etc/nginx/sites-available/chatapp
+        content: |
+          server {
+              listen 80;
+              server_name _default;
+
+              location / {
+                  include proxy_params;
+                  proxy_pass http://10.0.10.206:8000;
+              }
+          }
+
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Enable chatapp Nginx config
+      file:
+        src: /etc/nginx/sites-available/chatapp
+        dest: /etc/nginx/sites-enabled/chatapp
+        state: link
+        force: yes
+
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+        enabled: yes

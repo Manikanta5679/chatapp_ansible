@@ -1,0 +1,173 @@
+- name: Setup and deploy ChatApp on backend server
+  hosts: app
+  become: true
+
+  vars:
+    python38_path: /usr/bin/python3.8
+    python312_path: /usr/bin/python3.12
+    app_dir: /chatapp
+    repo_url: https://github.com/Manikanta5679/chatapp_deploy.git
+    env_path: /.env
+    db_host: 10.0.11.228
+
+  tasks:
+
+    - name: Install MySQL client and dependencies
+      apt:
+        name:
+          - mysql-client
+          - software-properties-common
+        state: present
+
+    - name: Add deadsnakes PPA
+      apt_repository:
+        repo: ppa:deadsnakes/ppa
+
+    - name: Install Python 3.8
+      apt:
+        name: python3.8
+        state: present
+
+    - name: Add Python 3.12 alternative
+      command: update-alternatives --install /usr/bin/python3 python3 {{ python312_path }} 1
+      ignore_errors: yes
+
+    - name: Add Python 3.8 alternative
+      command: update-alternatives --install /usr/bin/python3 python3 {{ python38_path }} 2
+
+    - name: Remove existing chatapp directory if any
+      file:
+        path: "{{ app_dir }}"
+        state: absent
+
+
+
+
+
+    - name: Clone ChatApp repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    - name: Create chatapp directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Set ownership of chatapp directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        recurse: yes
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Install Python development tools
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-dev
+          - pkg-config
+          - libmysqlclient-dev
+          - default-libmysqlclient-dev
+          - build-essential
+          - python3.8-distutils
+        state: present
+
+    - name: Install virtualenv
+      shell: pip3 install virtualenv
+
+    - name: Set PATH environment variable
+      shell: echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/ubuntu/.bashrc
+      args:
+        executable: /bin/bash
+
+    - name: Create Python virtual environment
+      command: virtualenv -p /usr/bin/python3 venv
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Install system dependencies for mysqlclient and Python build tools
+      apt:
+        name:
+          - python3.8-dev
+          - default-libmysqlclient-dev
+          - build-essential
+        state: present
+      become: yes
+
+    - name: Install Python dependencies from requirements.txt inside virtualenv
+      pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+
+    - name: Install mysqlclient inside virtualenv (if not in requirements.txt)
+      pip:
+        name: mysqlclient
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+
+    - name: Install python-dotenv inside virtualenv (if not in requirements.txt)
+      pip:
+        name: python-dotenv
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+
+    - name: Create .env file
+      copy:
+        dest: "{{ env_path }}"
+        content: |
+          DB_NAME='chatapp'
+          DB_USER='chatappadmin'
+          DB_PASSWORD='password123'
+          DB_HOST={{ db_host }}
+
+    - name: Set ownership for .env
+      file:
+        path: "{{ env_path }}"
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Insert dotenv load at line 2 in settings.py
+      blockinfile:
+        path: /chatapp/fundoo/fundoo/settings.py
+        block: |
+          from dotenv import load_dotenv
+          load_dotenv()
+        insertafter: '^import'
+        marker: "# {mark} ANSIBLE MANAGED DOTENV BLOCK"
+
+    - name: Create systemd service for ChatApp
+      copy:
+        dest: /etc/systemd/system/chatappdaemon.service
+        content: |
+          [Unit]
+          Description=Chatapp Service
+          After=network.target
+
+          [Service]
+          User=ubuntu
+          Group=ubuntu
+          EnvironmentFile={{ env_path }}
+          WorkingDirectory=/chatapp/fundoo
+          ExecStart=/bin/bash -c "cd /chatapp && source venv/bin/activate && cd /chatapp/fundoo && python3 manage.py runserver 0.0.0.0:8000"
+          [Install]
+          WantedBy=multi-user.target
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Start ChatApp service
+      systemd:
+        name: chatappdaemon.service
+        state: started
+        enabled: yes

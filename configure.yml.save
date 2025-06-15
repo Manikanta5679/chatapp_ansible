@@ -1,0 +1,100 @@
+---
+- name: Setup MySQL Database Server
+  hosts: db
+  become: yes
+
+  vars:
+    mysql_user_name: chatappadmin
+    mysql_user_password: password123
+    mysql_db_name: chatapp
+    mysql_root_password: password123
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install MySQL server
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: Stop MySQL service
+      systemd:
+        name: mysql
+        state: stopped
+
+    - name: Initialize MySQL data directory (only if not already initialized)
+      command: mysqld --initialize
+      args:
+        creates: /var/lib/mysql/mysql
+
+    - name: Start MySQL service
+      systemd:
+        name: mysql
+        state: started
+
+    - name: Set bind-address = 0.0.0.0
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+
+    - name: Set mysqlx-bind-address = 0.0.0.0
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^mysqlx-bind-address'
+        line: 'mysqlx-bind-address = 0.0.0.0'
+
+    - name: Restart MySQL to apply config changes
+      systemd:
+        name: mysql
+        state: restarted
+        enabled: yes
+
+    - name: Install PyMySQL for Ansible MySQL modules
+      apt:
+        name: python3-pymysql
+        state: present
+
+    - name: set mysql root password and allow password auth
+      mysql_user: 
+        name: root
+        host: localhost
+        password: "{{mysql_root_password}}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        priv: "*.*:ALL,GRANT"
+        state: present
+
+    - name: Remove anonymous MySQL users
+      mysql_user:
+        name: ''
+        host_all: yes
+        state: absent
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    - name: Remove test database
+      mysql_db:
+        name: test
+        state: absent
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+  
+
+    - name: Create application database
+      mysql_db:
+        name: "{{ mysql_db_name }}"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+
+    - name: Create application user with privileges
+      mysql_user:
+        name: "{{ mysql_user_name }}"
+        password: "{{ mysql_user_password }}"
+        priv: "{{ mysql_db_name }}.*:ALL"
+        host: "%"
+        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
