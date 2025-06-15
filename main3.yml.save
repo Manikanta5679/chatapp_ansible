@@ -1,0 +1,10 @@
+- name: create complete three tier aws infra
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  collections:
+    - amazon.aws
+    -community.crypto
+
+  vars:
+    region: ap-s
